@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Smart Grid Load Balancer — End-to-End Validation Script
-# Requires: curl, jq
+# Requires: curl
 # Usage: ./test_grid_flow.sh
 # =============================================================================
 
@@ -51,7 +51,7 @@ RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/nodes" \
   -d '{"name":"City Hospital","priority_level":1,"max_load_capacity":500}')
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Create Hospital node (Priority 1)" "201" "$STATUS"
-NODE_A_ID=$(echo "$BODY" | jq -r '.id')
+NODE_A_ID=$(echo "$BODY" | grep -oE '"id":"[^"]*"' | cut -d'"' -f4)
 info "Hospital Node ID: $NODE_A_ID"
 
 # Node B: Residential (Priority 2)
@@ -60,7 +60,7 @@ RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/nodes" \
   -d '{"name":"Green Valley Residential","priority_level":2,"max_load_capacity":300}')
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Create Residential node (Priority 2)" "201" "$STATUS"
-NODE_B_ID=$(echo "$BODY" | jq -r '.id')
+NODE_B_ID=$(echo "$BODY" | grep -oE '"id":"[^"]*"' | cut -d'"' -f4)
 info "Residential Node ID: $NODE_B_ID"
 
 # Solar Source (200 kW)
@@ -69,7 +69,7 @@ RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/sources" \
   -d '{"source_type":"Solar","current_output":200,"status":"Active"}')
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Create Solar source (200 kW)" "201" "$STATUS"
-SOURCE_ID=$(echo "$BODY" | jq -r '.id')
+SOURCE_ID=$(echo "$BODY" | grep -oE '"id":"[^"]*"' | cut -d'"' -f4)
 info "Solar Source ID: $SOURCE_ID"
 
 # Duplicate name check
@@ -88,18 +88,18 @@ RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/consumers" \
   -d "{\"node_id\":\"$NODE_A_ID\",\"type\":\"Building\",\"current_demand\":100}")
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Add Building (100 kW) to Hospital" "201" "$STATUS"
-C_A1_ID=$(echo "$BODY" | jq -r '.id')
+C_A1_ID=$(echo "$BODY" | grep -oE '"id":"[^"]*"' | cut -d'"' -f4)
 
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/consumers" \
   -H "Content-Type: application/json" \
   -d "{\"node_id\":\"$NODE_A_ID\",\"type\":\"EV_Charger\",\"current_demand\":30}")
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Add EV_Charger (30 kW) to Hospital" "201" "$STATUS"
-C_A2_ID=$(echo "$BODY" | jq -r '.id')
+C_A2_ID=$(echo "$BODY" | grep -oE '"id":"[^"]*"' | cut -d'"' -f4)
 
 # Verify Hospital total_demand = 130
 NODE_A=$(curl -s "$BASE/nodes/$NODE_A_ID")
-NODE_A_DEMAND=$(echo "$NODE_A" | jq -r '.total_demand')
+NODE_A_DEMAND=$(echo "$NODE_A" | grep -oE '"total_demand":[0-9.]+' | cut -d: -f2)
 assert_eq "Hospital total_demand = 130" "130" "$NODE_A_DEMAND"
 
 # Node B consumers (total: 90 kW)
@@ -108,18 +108,18 @@ RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/consumers" \
   -d "{\"node_id\":\"$NODE_B_ID\",\"type\":\"Streetlight\",\"current_demand\":20}")
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Add Streetlight (20 kW) to Residential" "201" "$STATUS"
-C_B1_ID=$(echo "$BODY" | jq -r '.id')
+C_B1_ID=$(echo "$BODY" | grep -oE '"id":"[^"]*"' | cut -d'"' -f4)
 
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/consumers" \
   -H "Content-Type: application/json" \
   -d "{\"node_id\":\"$NODE_B_ID\",\"type\":\"Building\",\"current_demand\":90}")
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Add Building (90 kW) to Residential" "201" "$STATUS"
-C_B2_ID=$(echo "$BODY" | jq -r '.id')
+C_B2_ID=$(echo "$BODY" | grep -oE '"id":"[^"]*"' | cut -d'"' -f4)
 
 # Verify Residential total_demand = 110
 NODE_B=$(curl -s "$BASE/nodes/$NODE_B_ID")
-NODE_B_DEMAND=$(echo "$NODE_B" | jq -r '.total_demand')
+NODE_B_DEMAND=$(echo "$NODE_B" | grep -oE '"total_demand":[0-9.]+' | cut -d: -f2)
 assert_eq "Residential total_demand = 110" "110" "$NODE_B_DEMAND"
 
 # Total demand (130 + 110 = 240) > Solar (200 kW) — system is overloaded
@@ -134,7 +134,7 @@ RESP=$(curl -s -w "\n%{http_code}" -X PUT "$BASE/sources/$SOURCE_ID" \
   -d '{"current_output":80}')
 STATUS=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | head -1)
 assert_status "Fluctuate Solar output to 80 kW (cloud cover)" "200" "$STATUS"
-NEW_OUTPUT=$(echo "$BODY" | jq -r '.current_output')
+NEW_OUTPUT=$(echo "$BODY" | grep -oE '"current_output":[0-9.]+' | cut -d: -f2)
 assert_eq "Solar current_output updated to 80" "80" "$NEW_OUTPUT"
 
 # ── Stability Check ───────────────────────────────────────────────────────────
@@ -147,16 +147,15 @@ curl -s -o /dev/null -X PUT "$BASE/consumers/$C_A1_ID" \
 
 # Verify Hospital demand updated to 135 and log exists
 NODE_A=$(curl -s "$BASE/nodes/$NODE_A_ID")
-UPDATED_DEMAND=$(echo "$NODE_A" | jq -r '.total_demand')
+UPDATED_DEMAND=$(echo "$NODE_A" | grep -oE '"total_demand":[0-9.]+' | cut -d: -f2)
 assert_eq "Hospital total_demand updated to 135 after consumer change" "135" "$UPDATED_DEMAND"
 
 LOGS=$(curl -s "$BASE/nodes/$NODE_A_ID/logs")
-LOG_COUNT=$(echo "$LOGS" | jq '.logs | length')
+LOG_COUNT=$(echo "$LOGS" | grep -oE '"stability_score"' | wc -l | tr -d ' ')
 if (( LOG_COUNT > 0 )); then
   pass "Hospital has $LOG_COUNT stability log entries"
-  LATEST_LOG=$(echo "$LOGS" | jq '.logs[0]')
-  SCORE=$(echo "$LATEST_LOG" | jq -r '.stability_score')
-  SUPPLY=$(echo "$LATEST_LOG" | jq -r '.total_supply')
+  SCORE=$(echo "$LOGS" | grep -oE '"stability_score":[0-9.]+' | head -1 | cut -d: -f2)
+  SUPPLY=$(echo "$LOGS" | grep -oE '"total_supply":[0-9.]+' | head -1 | cut -d: -f2)
   info "Latest log → total_supply: ${SUPPLY} kW, stability_score: ${SCORE}"
   # With 80kW supply and 135kW demand, stability < 100
   STABLE=$(echo "$SCORE < 100" | bc -l 2>/dev/null || python3 -c "print(1 if $SCORE < 100 else 0)")
@@ -168,7 +167,7 @@ fi
 
 # Global log summary
 SUMMARY=$(curl -s "$BASE/logs/summary")
-SUMMARY_COUNT=$(echo "$SUMMARY" | jq 'length')
+SUMMARY_COUNT=$(echo "$SUMMARY" | grep -oE '"node_id"' | wc -l | tr -d ' ')
 if (( SUMMARY_COUNT >= 2 )); then pass "Global log summary returns data for $SUMMARY_COUNT nodes";
 else fail "Global log summary returned fewer entries than expected"; fi
 
@@ -176,7 +175,7 @@ else fail "Global log summary returned fewer entries than expected"; fi
 section "4. ISOLATION TEST — Node A Changes Must Not Affect Node B Totals"
 
 # Record Node B demand before touching Node A
-NODE_B_BEFORE=$(curl -s "$BASE/nodes/$NODE_B_ID" | jq -r '.total_demand')
+NODE_B_BEFORE=$(curl -s "$BASE/nodes/$NODE_B_ID" | grep -oE '"total_demand":[0-9.]+' | cut -d: -f2)
 info "Node B demand before touching Node A: ${NODE_B_BEFORE} kW"
 
 # Modify a consumer in Node A
@@ -185,11 +184,11 @@ curl -s -o /dev/null -X PUT "$BASE/consumers/$C_A2_ID" \
   -d '{"current_demand":50}'
 
 # Node A demand should change (was 135, now 155)
-NODE_A_AFTER=$(curl -s "$BASE/nodes/$NODE_A_ID" | jq -r '.total_demand')
+NODE_A_AFTER=$(curl -s "$BASE/nodes/$NODE_A_ID" | grep -oE '"total_demand":[0-9.]+' | cut -d: -f2)
 assert_eq "Hospital demand updated to 155 after EV_Charger increase" "155" "$NODE_A_AFTER"
 
 # Node B demand must remain exactly the same
-NODE_B_AFTER=$(curl -s "$BASE/nodes/$NODE_B_ID" | jq -r '.total_demand')
+NODE_B_AFTER=$(curl -s "$BASE/nodes/$NODE_B_ID" | grep -oE '"total_demand":[0-9.]+' | cut -d: -f2)
 assert_eq "Residential demand unchanged after Node A modification" "$NODE_B_BEFORE" "$NODE_B_AFTER"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
@@ -225,7 +224,7 @@ assert_status "Hospital node (with consumers) still exists" "200" "$STATUS"
 curl -s -o /dev/null -X PUT "$BASE/consumers/$C_A1_ID" \
   -H "Content-Type: application/json" \
   -d '{"is_active":0}'
-NODE_A_INACTIVE=$(curl -s "$BASE/nodes/$NODE_A_ID" | jq -r '.total_demand')
+NODE_A_INACTIVE=$(curl -s "$BASE/nodes/$NODE_A_ID" | grep -oE '"total_demand":[0-9.]+' | cut -d: -f2)
 assert_eq "Hospital demand drops when consumer deactivated (Building 105kW inactive → 50 kW remain)" "50" "$NODE_A_INACTIVE"
 
 # Clean up source
